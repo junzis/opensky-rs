@@ -46,3 +46,7 @@ url = "2"
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

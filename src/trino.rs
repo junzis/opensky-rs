@@ -201,7 +201,7 @@ impl Trino {
     /// Execute a raw SQL query.
     pub async fn execute_query(&mut self, sql: &str) -> Result<FlightData> {
         let token = self.get_token().await?;
-        let username = self.config.username.as_deref().unwrap_or("opensky-rs");
+        let username = self.config.username.as_deref().unwrap_or("opensky");
 
         // Initial query submission
         let response = self
@@ -209,7 +209,7 @@ impl Trino {
             .post(TRINO_URL)
             .header("Authorization", format!("Bearer {}", token))
             .header("X-Trino-User", username)
-            .header("X-Trino-Source", "opensky-rs")
+            .header("X-Trino-Source", "opensky")
             .header("X-Trino-Catalog", "minio")
             .header("X-Trino-Schema", "osky")
             .body(sql.to_string())
@@ -309,7 +309,7 @@ impl Trino {
 
         let sql = build_history_query(&params);
         let token = self.get_token().await?;
-        let username = self.config.username.as_deref().unwrap_or("opensky-rs");
+        let username = self.config.username.as_deref().unwrap_or("opensky");
 
         // Initial query submission
         let response = self
@@ -317,7 +317,7 @@ impl Trino {
             .post(TRINO_URL)
             .header("Authorization", format!("Bearer {}", token))
             .header("X-Trino-User", username)
-            .header("X-Trino-Source", "opensky-rs")
+            .header("X-Trino-Source", "opensky")
             .header("X-Trino-Catalog", "minio")
             .header("X-Trino-Schema", "osky")
             .body(sql.to_string())
@@ -415,7 +415,7 @@ impl Trino {
     /// Cancel a running query.
     pub async fn cancel(&mut self, query_id: &str) -> Result<()> {
         let token = self.get_token().await?;
-        let username = self.config.username.as_deref().unwrap_or("opensky-rs");
+        let username = self.config.username.as_deref().unwrap_or("opensky");
 
         let url = format!("https://trino.opensky-network.org/v1/query/{}", query_id);
 

@@ -1,6 +1,6 @@
 //! Query result caching for OpenSky data.
 //!
-//! Caches query results as Parquet files in `~/.cache/opensky-rs/`.
+//! Caches query results as Parquet files in `~/.cache/opensky/`.
 //! Cache keys are derived from query parameters using a hash.
 
 use crate::types::{FlightData, QueryParams, OpenSkyError};
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 /// Default cache directory name.
-const CACHE_DIR_NAME: &str = "opensky-rs";
+const CACHE_DIR_NAME: &str = "opensky";
 
 /// Get the cache directory path.
 pub fn cache_dir() -> Option<PathBuf> {
