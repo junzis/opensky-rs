@@ -1,0 +1,25 @@
+.claude
+tmp
+
+# Build artifacts
+/target
+
+# Cargo lock for library crates (optional, but common for libs)
+# Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test/example output
+*.csv
+*.parquet
+
+# Environment
+.env
