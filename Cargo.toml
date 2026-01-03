@@ -1,5 +1,5 @@
 [package]
-name = "opensky-rs"
+name = "opensky"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.70"
@@ -8,7 +8,7 @@ authors = ["Junzi Sun <j.sun-1@tudelft.nl>"]
 license = "MIT"
 repository = "https://github.com/junzis/opensky-rs"
 homepage = "https://github.com/junzis/opensky-rs"
-documentation = "https://docs.rs/opensky-rs"
+documentation = "https://docs.rs/opensky"
 readme = "README.md"
 keywords = ["opensky", "aviation", "ads-b", "trino", "flight-data"]
 categories = ["api-bindings", "science"]

@@ -1,7 +1,7 @@
-# opensky-rs
+# opensky
 
-[![Crates.io](https://img.shields.io/crates/v/opensky-rs.svg)](https://crates.io/crates/opensky-rs)
-[![Documentation](https://docs.rs/opensky-rs/badge.svg)](https://docs.rs/opensky-rs)
+[![Crates.io](https://img.shields.io/crates/v/opensky.svg)](https://crates.io/crates/opensky)
+[![Documentation](https://docs.rs/opensky/badge.svg)](https://docs.rs/opensky)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A Rust client for the [OpenSky Network](https://opensky-network.org/) Trino database, providing access to historical ADS-B flight trajectory data.
@@ -23,7 +23,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-opensky-rs = "0.1"
+opensky = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -49,7 +49,7 @@ purge = 90 days
 ## Quick Start
 
 ```rust
-use opensky_rs::{Trino, QueryParams};
+use opensky::{Trino, QueryParams};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -152,11 +152,11 @@ let data = trino.history(params.clone()).await?;
 let data = trino.history_cached(params, false).await?;
 
 // Get cache statistics
-let stats = opensky_rs::cache_stats()?;
+let stats = opensky::cache_stats()?;
 println!("Cache: {} files, {}", stats.file_count, stats.size_human());
 
 // Clear all cached data
-opensky_rs::clear_cache()?;
+opensky::clear_cache()?;
 ```
 
 ### Working with Results

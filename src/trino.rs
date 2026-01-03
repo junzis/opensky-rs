@@ -91,7 +91,7 @@ impl Trino {
     pub async fn with_config(config: Config) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
-            .user_agent("opensky-rs/0.1.0")
+            .user_agent("opensky/0.1.0")
             .build()?;
 
         Ok(Self {

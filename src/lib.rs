@@ -1,4 +1,4 @@
-//! # opensky-rs
+//! # opensky
 //!
 //! A Rust client for the OpenSky Network Trino database.
 //!
@@ -8,7 +8,7 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use opensky_rs::{Trino, QueryParams};
+//! use opensky::{Trino, QueryParams};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {

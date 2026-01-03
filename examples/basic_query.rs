@@ -1,10 +1,10 @@
-//! Basic query example for opensky-rs.
+//! Basic query example for opensky.
 //!
 //! Run with: cargo run --example basic_query
 //!
 //! Make sure you have credentials configured in ~/.config/opensky/settings.conf
 
-use opensky_rs::{QueryParams, Trino};
+use opensky::{QueryParams, Trino};
 use std::env;
 
 #[tokio::main]
@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Show the generated SQL
     println!("\nGenerated query preview:");
-    println!("{}", opensky_rs::build_query_preview(&params));
+    println!("{}", opensky::build_query_preview(&params));
     println!();
 
     // Execute query with progress
