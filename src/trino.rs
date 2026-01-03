@@ -41,6 +41,7 @@ struct TokenResponse {
 #[serde(rename_all = "camelCase")]
 struct TrinoResponse {
     id: Option<String>,
+    #[allow(dead_code)]
     info_uri: Option<String>,
     next_uri: Option<String>,
     columns: Option<Vec<TrinoColumn>>,
@@ -68,6 +69,7 @@ struct TrinoStats {
 #[serde(rename_all = "camelCase")]
 struct TrinoError {
     message: String,
+    #[allow(dead_code)]
     error_name: Option<String>,
 }
 
