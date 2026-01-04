@@ -88,6 +88,9 @@ opensky history --start 2025-01-01 --icao24 485a32
 # Query a specific time range
 opensky history --start "2025-01-01 10:00:00" --stop "2025-01-01 12:00:00" --icao24 485a32
 
+# Query with duration (30m, 2h, 1d, 1w max)
+opensky history --start "2025-01-01 10:00:00" --duration 2h --icao24 485a32
+
 # Query by callsign
 opensky history --start 2025-01-01 --callsign KLM1234
 

@@ -1,8 +1,40 @@
 //! OpenSky CLI - Command-line interface for querying OpenSky Network flight data.
 
 use clap::{Parser, Subcommand};
+use chrono::{NaiveDateTime, Duration};
 use opensky::{QueryParams, Trino};
 use std::path::PathBuf;
+
+/// Parse a duration string like "30m", "2h", "1d", "1w" into chrono::Duration.
+/// Maximum allowed is 1 week.
+fn parse_duration(s: &str) -> Result<Duration, String> {
+    let s = s.trim().to_lowercase();
+    if s.is_empty() {
+        return Err("Empty duration".to_string());
+    }
+
+    let (num_str, unit) = s.split_at(s.len() - 1);
+    let num: i64 = num_str.parse().map_err(|_| format!("Invalid number: {}", num_str))?;
+
+    if num <= 0 {
+        return Err("Duration must be positive".to_string());
+    }
+
+    let duration = match unit {
+        "m" => Duration::minutes(num),
+        "h" => Duration::hours(num),
+        "d" => Duration::days(num),
+        "w" => Duration::weeks(num),
+        _ => return Err(format!("Unknown unit '{}'. Use m, h, d, or w", unit)),
+    };
+
+    // Max 1 week
+    if duration > Duration::weeks(1) {
+        return Err("Duration cannot exceed 1 week".to_string());
+    }
+
+    Ok(duration)
+}
 
 #[derive(Parser)]
 #[command(name = "opensky")]
@@ -21,8 +53,12 @@ enum Commands {
         start: String,
 
         /// Stop time (YYYY-MM-DD or YYYY-MM-DD HH:MM:SS)
-        #[arg(short = 'e', long)]
+        #[arg(short = 'e', long, conflicts_with = "duration")]
         stop: Option<String>,
+
+        /// Duration from start (e.g., 30m, 2h, 1d, 1w). Max 1 week.
+        #[arg(short = 'D', long, conflicts_with = "stop")]
+        duration: Option<String>,
 
         /// Aircraft ICAO24 address (hex, e.g., 485a32)
         #[arg(short, long)]
@@ -81,6 +117,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Commands::History {
             start,
             stop,
+            duration,
             icao24,
             callsign,
             departure,
@@ -99,17 +136,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 format!("{} 00:00:00", start)
             };
-            params.start = Some(start_str);
 
-            // Parse stop time (default to end of start day)
-            let stop_str = match stop {
-                Some(s) if s.contains(' ') => s,
-                Some(s) => format!("{} 23:59:59", s),
-                None => {
-                    let date_part = start.split(' ').next().unwrap_or(&start);
-                    format!("{} 23:59:59", date_part)
+            // Parse stop time (from --stop, --duration, or default to end of start day)
+            let stop_str = if let Some(dur_str) = duration {
+                // Calculate stop from start + duration
+                let dur = parse_duration(&dur_str)?;
+                let start_dt = NaiveDateTime::parse_from_str(&start_str, "%Y-%m-%d %H:%M:%S")
+                    .map_err(|e| format!("Invalid start time: {}", e))?;
+                let stop_dt = start_dt + dur;
+                stop_dt.format("%Y-%m-%d %H:%M:%S").to_string()
+            } else {
+                match stop {
+                    Some(s) if s.contains(' ') => s,
+                    Some(s) => format!("{} 23:59:59", s),
+                    None => {
+                        let date_part = start.split(' ').next().unwrap_or(&start);
+                        format!("{} 23:59:59", date_part)
+                    }
                 }
             };
+
+            params.start = Some(start_str);
             params.stop = Some(stop_str);
 
             params.icao24 = icao24;
