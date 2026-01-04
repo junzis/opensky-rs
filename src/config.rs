@@ -1,7 +1,9 @@
 //! Configuration management for OpenSky credentials.
 //!
-//! Reads credentials from `~/.config/opensky/settings.conf` (Linux/macOS)
-//! or `%LOCALAPPDATA%\opensky\settings.conf` (Windows).
+//! Reads credentials from:
+//! - Linux: `~/.config/opensky/settings.conf`
+//! - macOS: `~/Library/Application Support/opensky/settings.conf`
+//! - Windows: `%LOCALAPPDATA%\opensky\settings.conf`
 
 use crate::types::{OpenSkyError, Result};
 use configparser::ini::Ini;
@@ -53,6 +55,10 @@ impl Config {
     }
 
     /// Get the platform-specific config directory for OpenSky.
+    ///
+    /// - Linux: `~/.config/opensky`
+    /// - macOS: `~/Library/Application Support/opensky`
+    /// - Windows: `%LOCALAPPDATA%\opensky`
     pub fn config_dir() -> Result<PathBuf> {
         #[cfg(target_os = "linux")]
         {
@@ -105,6 +111,44 @@ impl Config {
         self.password
             .as_deref()
             .ok_or_else(|| OpenSkyError::Config("Password not configured".into()))
+    }
+
+    /// Save configuration to the default config file.
+    pub fn save(&self) -> Result<()> {
+        let config_path = Self::config_path()?;
+        self.save_to_path(&config_path)
+    }
+
+    /// Save configuration to a specific path.
+    pub fn save_to_path(&self, path: &PathBuf) -> Result<()> {
+        use std::fs;
+
+        // Ensure parent directory exists
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut ini = Ini::new();
+
+        // Set values in the ini
+        if let Some(ref u) = self.username {
+            ini.set("default", "username", Some(u.clone()));
+        }
+        if let Some(ref p) = self.password {
+            ini.set("default", "password", Some(p.clone()));
+        }
+        if let Some(ref c) = self.client_id {
+            ini.set("default", "client_id", Some(c.clone()));
+        }
+        if let Some(ref c) = self.client_secret {
+            ini.set("default", "client_secret", Some(c.clone()));
+        }
+        if let Some(ref p) = self.cache_purge {
+            ini.set("cache", "purge", Some(p.clone()));
+        }
+
+        ini.write(path).map_err(|e| OpenSkyError::Config(e.to_string()))?;
+        Ok(())
     }
 }
 

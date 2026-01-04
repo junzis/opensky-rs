@@ -2,8 +2,8 @@
 
 use crate::cache;
 use crate::config::Config;
-use crate::query::build_history_query;
-use crate::types::{FlightData, OpenSkyError, QueryParams, Result, FLIGHT_COLUMNS};
+use crate::query::{build_history_query, build_flightlist_query, build_rawdata_query};
+use crate::types::{FlightData, OpenSkyError, QueryParams, RawTable, Result, FLIGHT_COLUMNS, FLIGHTLIST_COLUMNS, RAWDATA_COLUMNS};
 
 use polars::prelude::*;
 use reqwest::Client;
@@ -190,7 +190,7 @@ impl Trino {
 
         // Execute query
         let sql = build_history_query(&params);
-        let data = self.execute_query(&sql).await?;
+        let data = self.execute_query(&sql, FLIGHT_COLUMNS).await?;
 
         // Cache the result if we got data
         if !data.is_empty() {
@@ -200,8 +200,40 @@ impl Trino {
         Ok(data)
     }
 
+    /// Query flight list data from flights_data4 table.
+    ///
+    /// Returns a list of flights with departure/arrival times and airports.
+    /// This is useful for finding flights before querying their trajectories.
+    pub async fn flightlist(&mut self, params: QueryParams) -> Result<FlightData> {
+        let sql = build_flightlist_query(&params);
+        self.execute_query(&sql, FLIGHTLIST_COLUMNS).await
+    }
+
+    /// Query raw ADS-B messages from OpenSky.
+    ///
+    /// Returns raw messages (mintime, rawmsg, icao24) from the specified table.
+    /// Default table is RollcallReplies (rollcall_replies_data4).
+    ///
+    /// Available tables:
+    /// - `RawTable::RollcallReplies` - Mode S rollcall replies (default)
+    /// - `RawTable::Position` - ADS-B position messages
+    /// - `RawTable::Velocity` - ADS-B velocity messages
+    /// - `RawTable::Identification` - Aircraft identification
+    /// - `RawTable::Acas` - TCAS/ACAS data
+    /// - `RawTable::OperationalStatus` - Operational status messages
+    /// - `RawTable::AllcallReplies` - All-call replies
+    pub async fn rawdata(&mut self, params: QueryParams) -> Result<FlightData> {
+        self.rawdata_table(params, RawTable::default()).await
+    }
+
+    /// Query raw ADS-B messages from a specific table.
+    pub async fn rawdata_table(&mut self, params: QueryParams, table: RawTable) -> Result<FlightData> {
+        let sql = build_rawdata_query(&params, table);
+        self.execute_query(&sql, RAWDATA_COLUMNS).await
+    }
+
     /// Execute a raw SQL query.
-    pub async fn execute_query(&mut self, sql: &str) -> Result<FlightData> {
+    pub async fn execute_query(&mut self, sql: &str, default_columns: &[&str]) -> Result<FlightData> {
         let token = self.get_token().await?;
         let username = self.config.username.as_deref().unwrap_or("opensky");
 
@@ -266,7 +298,7 @@ impl Trino {
         }
 
         // Convert to DataFrame
-        let df = self.rows_to_dataframe(&columns.unwrap_or_default(), all_rows)?;
+        let df = self.rows_to_dataframe(&columns.unwrap_or_default(), all_rows, default_columns)?;
         Ok(FlightData::new(df))
     }
 
@@ -403,7 +435,7 @@ impl Trino {
             progress_callback(status);
         }
 
-        let df = self.rows_to_dataframe(&columns.unwrap_or_default(), all_rows)?;
+        let df = self.rows_to_dataframe(&columns.unwrap_or_default(), all_rows, FLIGHT_COLUMNS)?;
         let data = FlightData::new(df);
 
         // Cache the result if we got data
@@ -444,10 +476,11 @@ impl Trino {
         &self,
         columns: &[TrinoColumn],
         rows: Vec<Vec<serde_json::Value>>,
+        default_columns: &[&str],
     ) -> Result<DataFrame> {
         if rows.is_empty() {
             // Return empty DataFrame with correct columns
-            let series: Vec<Column> = FLIGHT_COLUMNS
+            let series: Vec<Column> = default_columns
                 .iter()
                 .map(|name| Column::new((*name).into(), Vec::<String>::new()))
                 .collect();

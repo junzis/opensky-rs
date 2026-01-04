@@ -48,11 +48,11 @@ pub fn cache_key(params: &QueryParams) -> String {
     params.limit.hash(&mut hasher);
 
     if let Some(bounds) = &params.bounds {
-        // Hash bounds as integers (f64 doesn't impl Hash)
-        (bounds.west as i64).hash(&mut hasher);
-        (bounds.south as i64).hash(&mut hasher);
-        (bounds.east as i64).hash(&mut hasher);
-        (bounds.north as i64).hash(&mut hasher);
+        // Hash bounds using their bit representation (f64 doesn't impl Hash)
+        bounds.west.to_bits().hash(&mut hasher);
+        bounds.south.to_bits().hash(&mut hasher);
+        bounds.east.to_bits().hash(&mut hasher);
+        bounds.north.to_bits().hash(&mut hasher);
     }
 
     let hash = hasher.finish();

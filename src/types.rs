@@ -143,7 +143,7 @@ impl QueryParams {
     }
 }
 
-/// Flight data columns returned by queries.
+/// Flight data columns returned by history queries (state vectors).
 pub const FLIGHT_COLUMNS: &[&str] = &[
     "time",
     "icao24",
@@ -159,6 +159,59 @@ pub const FLIGHT_COLUMNS: &[&str] = &[
     "geoaltitude",
     "hour",
 ];
+
+/// Flight list columns returned by flightlist queries.
+pub const FLIGHTLIST_COLUMNS: &[&str] = &[
+    "icao24",
+    "callsign",
+    "firstseen",
+    "lastseen",
+    "estdepartureairport",
+    "estarrivalairport",
+    "day",
+];
+
+/// Default columns for raw data queries.
+pub const RAWDATA_COLUMNS: &[&str] = &[
+    "mintime",
+    "rawmsg",
+    "icao24",
+];
+
+/// Raw data table types available in OpenSky.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum RawTable {
+    /// Mode S rollcall replies (default)
+    #[default]
+    RollcallReplies,
+    /// ACAS/TCAS data
+    Acas,
+    /// All-call replies
+    AllcallReplies,
+    /// Aircraft identification messages
+    Identification,
+    /// Operational status messages
+    OperationalStatus,
+    /// ADS-B position messages
+    Position,
+    /// ADS-B velocity messages
+    Velocity,
+}
+
+impl RawTable {
+    /// Get the SQL table name.
+    pub fn table_name(&self) -> &'static str {
+        match self {
+            RawTable::RollcallReplies => "minio.osky.rollcall_replies_data4",
+            RawTable::Acas => "minio.osky.acas_data4",
+            RawTable::AllcallReplies => "minio.osky.allcall_replies_data4",
+            RawTable::Identification => "minio.osky.identification_data4",
+            RawTable::OperationalStatus => "minio.osky.operational_status_data4",
+            RawTable::Position => "minio.osky.position_data4",
+            RawTable::Velocity => "minio.osky.velocity_data4",
+        }
+    }
+}
 
 /// Wrapper around Polars DataFrame for flight data.
 #[derive(Debug, Clone)]

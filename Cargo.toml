@@ -43,9 +43,20 @@ thiserror = "2"
 # URL handling
 url = "2"
 
+# CLI (optional)
+clap = { version = "4", features = ["derive"], optional = true }
+
 [dev-dependencies]
 tokio-test = "0.4"
 tempfile = "3"
+
+[features]
+default = []
+cli = ["clap"]
+
+[[bin]]
+name = "opensky"
+required-features = ["cli"]
 
 [package.metadata.docs.rs]
 all-features = true

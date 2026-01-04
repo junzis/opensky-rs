@@ -16,8 +16,11 @@ A Rust client for the [OpenSky Network](https://opensky-network.org/) Trino data
 - Progress callbacks for long-running queries
 - Export results to CSV or Parquet
 - Built on [Polars](https://pola.rs/) DataFrames for efficient data handling
+- **Command-line interface** for quick queries without writing code
 
 ## Installation
+
+### As a Library
 
 Add this to your `Cargo.toml`:
 
@@ -27,6 +30,23 @@ opensky = "0.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
+### Command-Line Interface
+
+Install the CLI tool with cargo:
+
+```bash
+cargo install opensky --features cli
+```
+
+Or build from source:
+
+```bash
+git clone https://github.com/junzis/opensky-rs
+cd opensky-rs
+cargo build --release --features cli
+# Binary at target/release/opensky
+```
+
 ## Configuration
 
 Before using the library, you need to configure your OpenSky Network credentials.
@@ -34,8 +54,11 @@ Before using the library, you need to configure your OpenSky Network credentials
 1. Register for an account at [opensky-network.org](https://opensky-network.org/)
 2. Create the configuration file:
 
-**Linux/macOS:** `~/.config/opensky/settings.conf`
-**Windows:** `%LOCALAPPDATA%\opensky\settings.conf`
+| Platform | Config Path |
+|----------|-------------|
+| **Linux** | `~/.config/opensky/settings.conf` |
+| **macOS** | `~/Library/Application Support/opensky/settings.conf` |
+| **Windows** | `%LOCALAPPDATA%\opensky\settings.conf` |
 
 ```ini
 [default]
@@ -46,7 +69,64 @@ password = your_password
 purge = 90 days
 ```
 
-## Quick Start
+You can also configure credentials using the CLI:
+
+```bash
+opensky config --username your_username --password your_password
+```
+
+## CLI Usage
+
+The `opensky` CLI provides quick access to flight data from the command line.
+
+### Query Historical Data
+
+```bash
+# Query by ICAO24 address
+opensky history --start 2025-01-01 --icao24 485a32
+
+# Query a specific time range
+opensky history --start "2025-01-01 10:00:00" --stop "2025-01-01 12:00:00" --icao24 485a32
+
+# Query by callsign
+opensky history --start 2025-01-01 --callsign KLM1234
+
+# Query by airport
+opensky history --start 2025-01-01 --departure EHAM
+opensky history --start 2025-01-01 --arrival EGLL
+opensky history --start 2025-01-01 --departure EHAM --arrival EGLL
+
+# Limit results
+opensky history --start 2025-01-01 --icao24 485a32 --limit 1000
+```
+
+### Export Results
+
+```bash
+# Export to CSV
+opensky history --start 2025-01-01 --icao24 485a32 --output flight.csv
+
+# Export to Parquet
+opensky history --start 2025-01-01 --icao24 485a32 --output flight.parquet
+```
+
+### Show Generated Query
+
+```bash
+opensky history --start 2025-01-01 --icao24 485a32 --show-query
+```
+
+### Manage Configuration
+
+```bash
+# Set credentials
+opensky config --username myuser --password mypass
+
+# View current configuration
+opensky config --show
+```
+
+## Library Quick Start
 
 ```rust
 use opensky::{Trino, QueryParams};
@@ -71,7 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-## Usage Examples
+## Library Usage Examples
 
 ### Query by Aircraft
 
@@ -109,6 +189,23 @@ let params = QueryParams::new()
     .departure("EHAM")
     .arrival("EGLL")
     .time_range("2025-01-01 00:00:00", "2025-01-01 23:59:59");
+```
+
+### Flight List (flights_data4)
+
+Query the flight list table for departure/arrival information:
+
+```rust
+// Get all flights from EHAM to EGLL on a given day
+let params = QueryParams::new()
+    .departure("EHAM")
+    .arrival("EGLL")
+    .time_range("2025-01-01 00:00:00", "2025-01-01 23:59:59");
+
+let flights = trino.flightlist(params).await?;
+
+// Returns: icao24, callsign, firstseen, lastseen,
+//          estdepartureairport, estarrivalairport, day
 ```
 
 ### Query by Geographic Bounds

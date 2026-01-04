@@ -2,13 +2,13 @@
 //!
 //! Note: OpenSky stores timestamps as Unix epoch integers, not SQL TIMESTAMP types.
 
-use crate::types::{QueryParams, FLIGHT_COLUMNS};
+use crate::types::{QueryParams, RawTable, FLIGHT_COLUMNS, FLIGHTLIST_COLUMNS, RAWDATA_COLUMNS};
 use chrono::{NaiveDateTime, Duration, Timelike};
 
 /// The main table for state vector data.
 const STATE_VECTORS_TABLE: &str = "minio.osky.state_vectors_data4";
 
-/// The flights table for airport filtering.
+/// The flights table for flight lists and airport filtering.
 const FLIGHTS_TABLE: &str = "minio.osky.flights_data4";
 
 /// Build a SQL query for the history() method.
@@ -219,6 +219,212 @@ fn escape_sql(s: &str) -> String {
     s.replace('\'', "''")
 }
 
+/// Build a SQL query for the flightlist() method.
+///
+/// This generates a SELECT statement against flights_data4.
+/// Behavior matches pyopensky: when departure_airport is set, filters by firstseen;
+/// otherwise filters by lastseen.
+pub fn build_flightlist_query(params: &QueryParams) -> String {
+    let columns = FLIGHTLIST_COLUMNS.join(", ");
+
+    let mut sql = format!(
+        "SELECT {columns}\nFROM {FLIGHTS_TABLE}\nWHERE 1=1"
+    );
+
+    // Time and day bounds (required for partition pruning)
+    // pyopensky behavior: filter on firstseen if departure_airport is set, else lastseen
+    if let (Some(start), Some(stop)) = (&params.start, &params.stop) {
+        let start_ts = datetime_to_unix(start);
+        let stop_ts = datetime_to_unix(stop);
+        let (start_day_ts, stop_day_ts) = compute_day_bounds_unix(start, stop);
+
+        // Day partition filter
+        sql.push_str(&format!("\n  AND day >= {start_day_ts}"));
+        sql.push_str(&format!("\n  AND day < {stop_day_ts}"));
+
+        // Time filter: firstseen if departure filter, else lastseen
+        if params.departure_airport.is_some() {
+            sql.push_str(&format!("\n  AND firstseen >= {start_ts}"));
+            sql.push_str(&format!("\n  AND firstseen <= {stop_ts}"));
+        } else {
+            sql.push_str(&format!("\n  AND lastseen >= {start_ts}"));
+            sql.push_str(&format!("\n  AND lastseen <= {stop_ts}"));
+        }
+    }
+
+    // ICAO24 filter
+    if let Some(icao24) = &params.icao24 {
+        let icao24_lower = icao24.to_lowercase();
+        if icao24_lower.contains('%') || icao24_lower.contains('_') {
+            sql.push_str(&format!("\n  AND icao24 LIKE '{}'", escape_sql(&icao24_lower)));
+        } else {
+            sql.push_str(&format!("\n  AND icao24 = '{}'", escape_sql(&icao24_lower)));
+        }
+    }
+
+    // Callsign filter
+    if let Some(callsign) = &params.callsign {
+        if callsign.contains('%') || callsign.contains('_') {
+            sql.push_str(&format!("\n  AND callsign LIKE '{}'", escape_sql(callsign)));
+        } else {
+            sql.push_str(&format!("\n  AND callsign = '{}'", escape_sql(callsign)));
+        }
+    }
+
+    // Departure airport
+    if let Some(dep) = &params.departure_airport {
+        sql.push_str(&format!("\n  AND estdepartureairport = '{}'", escape_sql(dep)));
+    }
+
+    // Arrival airport
+    if let Some(arr) = &params.arrival_airport {
+        sql.push_str(&format!("\n  AND estarrivalairport = '{}'", escape_sql(arr)));
+    }
+
+    // Either airport
+    if let Some(airport) = &params.airport {
+        sql.push_str(&format!(
+            "\n  AND (estdepartureairport = '{}' OR estarrivalairport = '{}')",
+            escape_sql(airport), escape_sql(airport)
+        ));
+    }
+
+    // Order by firstseen
+    sql.push_str("\nORDER BY firstseen");
+
+    if let Some(limit) = params.limit {
+        sql.push_str(&format!("\nLIMIT {limit}"));
+    }
+
+    sql
+}
+
+/// Build a SQL query for the rawdata() method.
+///
+/// This generates a SELECT statement against raw message tables (e.g., rollcall_replies_data4).
+/// Behavior matches pyopensky: when airport filters are set, joins with flights_data4.
+pub fn build_rawdata_query(params: &QueryParams, table: RawTable) -> String {
+    let table_name = table.table_name();
+    let columns = RAWDATA_COLUMNS.join(", ");
+
+    let has_airport_filter = params.departure_airport.is_some()
+        || params.arrival_airport.is_some()
+        || params.airport.is_some();
+
+    if has_airport_filter {
+        build_rawdata_airport_join_query(params, table_name, &columns)
+    } else {
+        build_rawdata_simple_query(params, table_name, &columns)
+    }
+}
+
+/// Build a simple raw data query without airport join.
+fn build_rawdata_simple_query(params: &QueryParams, table_name: &str, columns: &str) -> String {
+    let mut sql = format!(
+        "SELECT {columns}\nFROM {table_name}\nWHERE rawmsg IS NOT NULL"
+    );
+
+    // Time filters (required for partition pruning)
+    // Raw tables use mintime (float) instead of time (int)
+    if let (Some(start), Some(stop)) = (&params.start, &params.stop) {
+        let start_ts = datetime_to_unix(start);
+        let stop_ts = datetime_to_unix(stop);
+        let (start_hour_ts, stop_hour_ts) = compute_hour_bounds_unix(start, stop);
+
+        sql.push_str(&format!("\n  AND mintime >= {start_ts}"));
+        sql.push_str(&format!("\n  AND mintime <= {stop_ts}"));
+        sql.push_str(&format!("\n  AND hour >= {start_hour_ts}"));
+        sql.push_str(&format!("\n  AND hour < {stop_hour_ts}"));
+    }
+
+    // ICAO24 filter
+    if let Some(icao24) = &params.icao24 {
+        let icao24_lower = icao24.to_lowercase();
+        if icao24_lower.contains('%') || icao24_lower.contains('_') {
+            sql.push_str(&format!("\n  AND icao24 LIKE '{}'", escape_sql(&icao24_lower)));
+        } else {
+            sql.push_str(&format!("\n  AND icao24 = '{}'", escape_sql(&icao24_lower)));
+        }
+    }
+
+    // Order and limit
+    sql.push_str("\nORDER BY mintime");
+
+    if let Some(limit) = params.limit {
+        sql.push_str(&format!("\nLIMIT {limit}"));
+    }
+
+    sql
+}
+
+/// Build a raw data query with airport join.
+fn build_rawdata_airport_join_query(params: &QueryParams, table_name: &str, columns: &str) -> String {
+    let (start, stop) = match (&params.start, &params.stop) {
+        (Some(s), Some(e)) => (s.as_str(), e.as_str()),
+        _ => return build_rawdata_simple_query(params, table_name, columns),
+    };
+
+    let start_ts = datetime_to_unix(start);
+    let stop_ts = datetime_to_unix(stop);
+    let (start_hour_ts, stop_hour_ts) = compute_hour_bounds_unix(start, stop);
+    let (start_day_ts, stop_day_ts) = compute_day_bounds_unix(start, stop);
+
+    // Build the flights subquery
+    let mut flights_where = vec![
+        format!("day >= {start_day_ts}"),
+        format!("day <= {stop_day_ts}"),
+    ];
+
+    if let Some(icao24) = &params.icao24 {
+        flights_where.push(format!("icao24 = '{}'", escape_sql(&icao24.to_lowercase())));
+    }
+    if let Some(dep) = &params.departure_airport {
+        flights_where.push(format!("estdepartureairport = '{}'", escape_sql(dep)));
+    }
+    if let Some(arr) = &params.arrival_airport {
+        flights_where.push(format!("estarrivalairport = '{}'", escape_sql(arr)));
+    }
+    if let Some(airport) = &params.airport {
+        flights_where.push(format!(
+            "(estdepartureairport = '{}' OR estarrivalairport = '{}')",
+            escape_sql(airport), escape_sql(airport)
+        ));
+    }
+
+    let flights_subquery = format!(
+        r#"SELECT icao24, firstseen, lastseen
+FROM {FLIGHTS_TABLE}
+WHERE {}"#,
+        flights_where.join("\n  AND ")
+    );
+
+    // Build the main query with join
+    // Note: rawdata JOIN is only on icao24 (not callsign like history)
+    let prefixed_columns = columns.split(", ").map(|c| format!("raw.{c}")).collect::<Vec<_>>().join(", ");
+
+    let mut sql = format!(
+        r#"SELECT {prefixed_columns}
+FROM {table_name} raw
+JOIN ({flights_subquery}) fl
+  ON raw.icao24 = fl.icao24
+WHERE raw.mintime >= fl.firstseen
+  AND raw.mintime <= fl.lastseen
+  AND raw.mintime >= {start_ts}
+  AND raw.mintime <= {stop_ts}
+  AND raw.hour >= {start_hour_ts}
+  AND raw.hour < {stop_hour_ts}
+  AND raw.rawmsg IS NOT NULL"#
+    );
+
+    sql.push_str("\nORDER BY raw.mintime");
+
+    if let Some(limit) = params.limit {
+        sql.push_str(&format!("\nLIMIT {limit}"));
+    }
+
+    sql
+}
+
 /// Build a preview of the query (for display purposes).
 pub fn build_query_preview(params: &QueryParams) -> String {
     let mut parts = vec!["trino.history(".to_string()];
@@ -333,5 +539,75 @@ mod tests {
         assert!(preview.contains("trino.history("));
         assert!(preview.contains("icao24=\"485a32\""));
         assert!(preview.contains("departure_airport=\"EHAM\""));
+    }
+
+    #[test]
+    fn test_flightlist_query() {
+        let params = QueryParams::new()
+            .time_range("2025-01-01 00:00:00", "2025-01-01 23:59:59")
+            .departure("EHAM");
+
+        let sql = build_flightlist_query(&params);
+
+        assert!(sql.contains("SELECT icao24, callsign, firstseen, lastseen"));
+        assert!(sql.contains("FROM minio.osky.flights_data4"));
+        assert!(sql.contains("estdepartureairport = 'EHAM'"));
+        assert!(sql.contains("day >="));
+        assert!(sql.contains("ORDER BY firstseen"));
+    }
+
+    #[test]
+    fn test_flightlist_with_airport() {
+        let params = QueryParams::new()
+            .time_range("2025-01-01 00:00:00", "2025-01-01 23:59:59")
+            .departure("EHAM")
+            .arrival("EGLL");
+
+        let sql = build_flightlist_query(&params);
+
+        assert!(sql.contains("estdepartureairport = 'EHAM'"));
+        assert!(sql.contains("estarrivalairport = 'EGLL'"));
+    }
+
+    #[test]
+    fn test_rawdata_simple_query() {
+        let params = QueryParams::new()
+            .icao24("485a32")
+            .time_range("2025-01-01 10:00:00", "2025-01-01 12:00:00");
+
+        let sql = build_rawdata_query(&params, RawTable::RollcallReplies);
+
+        assert!(sql.contains("SELECT mintime, rawmsg, icao24"));
+        assert!(sql.contains("FROM minio.osky.rollcall_replies_data4"));
+        assert!(sql.contains("rawmsg IS NOT NULL"));
+        assert!(sql.contains("icao24 = '485a32'"));
+        assert!(sql.contains("ORDER BY mintime"));
+    }
+
+    #[test]
+    fn test_rawdata_position_table() {
+        let params = QueryParams::new()
+            .icao24("485a32")
+            .time_range("2025-01-01 10:00:00", "2025-01-01 12:00:00");
+
+        let sql = build_rawdata_query(&params, RawTable::Position);
+
+        assert!(sql.contains("FROM minio.osky.position_data4"));
+    }
+
+    #[test]
+    fn test_rawdata_with_airport() {
+        let params = QueryParams::new()
+            .time_range("2025-01-01 00:00:00", "2025-01-01 23:59:59")
+            .departure("EHAM");
+
+        let sql = build_rawdata_query(&params, RawTable::RollcallReplies);
+
+        assert!(sql.contains("JOIN"));
+        assert!(sql.contains("flights_data4"));
+        assert!(sql.contains("estdepartureairport = 'EHAM'"));
+        // rawdata JOIN is only on icao24, not callsign
+        assert!(sql.contains("ON raw.icao24 = fl.icao24"));
+        assert!(sql.contains("raw.mintime >= fl.firstseen"));
     }
 }
