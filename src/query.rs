@@ -426,8 +426,18 @@ WHERE raw.mintime >= fl.firstseen
 }
 
 /// Build a preview of the query (for display purposes).
+///
+/// Uses "history" as the default method name. For other query types,
+/// use `build_query_preview_method()`.
 pub fn build_query_preview(params: &QueryParams) -> String {
-    let mut parts = vec!["trino.history(".to_string()];
+    build_query_preview_method(params, "history")
+}
+
+/// Build a preview with a specific method name.
+///
+/// Method names: "history" (trajectory), "flightlist" (flights), "rawdata" (raw ADS-B)
+pub fn build_query_preview_method(params: &QueryParams, method: &str) -> String {
+    let mut parts = vec![format!("trino.{}(", method)];
 
     if let Some(start) = &params.start {
         parts.push(format!("    start=\"{start}\","));

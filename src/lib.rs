@@ -54,7 +54,7 @@ pub mod types;
 // Re-export main types for convenience
 pub use cache::{cache_dir, cache_stats, clear_cache, purge_old_cache, CacheStats};
 pub use config::Config;
-pub use query::{build_history_query, build_flightlist_query, build_rawdata_query, build_query_preview};
+pub use query::{build_history_query, build_flightlist_query, build_rawdata_query, build_query_preview, build_query_preview_method};
 pub use trino::{QueryStatus, Trino};
 pub use types::{Bounds, FlightData, OpenSkyError, QueryParams, RawTable, Result, FLIGHT_COLUMNS, FLIGHTLIST_COLUMNS, RAWDATA_COLUMNS};
 
