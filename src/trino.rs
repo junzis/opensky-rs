@@ -21,6 +21,7 @@ pub struct Trino {
     client: Client,
     config: Config,
     token: Option<TokenInfo>,
+    source: String,
 }
 
 #[derive(Debug, Clone)]
@@ -93,14 +94,20 @@ impl Trino {
     pub async fn with_config(config: Config) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
-            .user_agent("opensky/0.1.0")
+            .user_agent("opensky-rs/0.2.0")
             .build()?;
 
         Ok(Self {
             client,
             config,
             token: None,
+            source: "opensky-rs".to_string(),
         })
+    }
+
+    /// Set the source identifier shown in Trino UI.
+    pub fn set_source(&mut self, source: impl Into<String>) {
+        self.source = source.into();
     }
 
     /// Get or refresh the authentication token.
@@ -209,6 +216,19 @@ impl Trino {
         self.execute_query(&sql, FLIGHTLIST_COLUMNS).await
     }
 
+    /// Query flight list with progress callback.
+    pub async fn flightlist_with_progress<F>(
+        &mut self,
+        params: QueryParams,
+        progress_callback: F,
+    ) -> Result<FlightData>
+    where
+        F: FnMut(QueryStatus),
+    {
+        let sql = build_flightlist_query(&params);
+        self.execute_query_with_progress(&sql, FLIGHTLIST_COLUMNS, progress_callback).await
+    }
+
     /// Query raw ADS-B messages from OpenSky.
     ///
     /// Returns raw messages (mintime, rawmsg, icao24) from the specified table.
@@ -224,6 +244,19 @@ impl Trino {
     /// - `RawTable::AllcallReplies` - All-call replies
     pub async fn rawdata(&mut self, params: QueryParams) -> Result<FlightData> {
         self.rawdata_table(params, RawTable::default()).await
+    }
+
+    /// Query raw ADS-B messages with progress callback.
+    pub async fn rawdata_with_progress<F>(
+        &mut self,
+        params: QueryParams,
+        progress_callback: F,
+    ) -> Result<FlightData>
+    where
+        F: FnMut(QueryStatus),
+    {
+        let sql = build_rawdata_query(&params, RawTable::default());
+        self.execute_query_with_progress(&sql, RAWDATA_COLUMNS, progress_callback).await
     }
 
     /// Query raw ADS-B messages from a specific table.
@@ -243,7 +276,7 @@ impl Trino {
             .post(TRINO_URL)
             .header("Authorization", format!("Bearer {}", token))
             .header("X-Trino-User", username)
-            .header("X-Trino-Source", "opensky")
+            .header("X-Trino-Source", &self.source)
             .header("X-Trino-Catalog", "minio")
             .header("X-Trino-Schema", "osky")
             .body(sql.to_string())
@@ -302,6 +335,115 @@ impl Trino {
         Ok(FlightData::new(df))
     }
 
+    /// Execute a SQL query with progress callback.
+    ///
+    /// This is the generic version that all query types can use.
+    pub async fn execute_query_with_progress<F>(
+        &mut self,
+        sql: &str,
+        default_columns: &[&str],
+        mut progress_callback: F,
+    ) -> Result<FlightData>
+    where
+        F: FnMut(QueryStatus),
+    {
+        let token = self.get_token().await?;
+        let username = self.config.username.as_deref().unwrap_or("opensky");
+
+        // Initial query submission
+        let response = self
+            .client
+            .post(TRINO_URL)
+            .header("Authorization", format!("Bearer {}", token))
+            .header("X-Trino-User", username)
+            .header("X-Trino-Source", &self.source)
+            .header("X-Trino-Catalog", "minio")
+            .header("X-Trino-Schema", "osky")
+            .body(sql.to_string())
+            .send()
+            .await?;
+
+        response.error_for_status_ref()?;
+
+        let mut trino_response: TrinoResponse = response.json().await?;
+        let query_id = trino_response.id.clone();
+
+        if let Some(error) = &trino_response.error {
+            return Err(OpenSkyError::Query(error.message.clone()));
+        }
+
+        let mut all_rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut columns: Option<Vec<TrinoColumn>> = trino_response.columns;
+
+        if let Some(data) = trino_response.data {
+            all_rows.extend(data);
+        }
+
+        // Report initial status
+        let status = QueryStatus {
+            query_id: query_id.clone(),
+            state: trino_response
+                .stats
+                .as_ref()
+                .map(|s| s.state.clone())
+                .unwrap_or_else(|| "RUNNING".to_string()),
+            progress: trino_response
+                .stats
+                .as_ref()
+                .and_then(|s| s.progress_percentage)
+                .unwrap_or(0.0),
+            row_count: all_rows.len(),
+        };
+        progress_callback(status);
+
+        while let Some(next_uri) = trino_response.next_uri {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+
+            let response = self
+                .client
+                .get(&next_uri)
+                .header("Authorization", format!("Bearer {}", token))
+                .header("X-Trino-User", username)
+                .send()
+                .await?;
+
+            response.error_for_status_ref()?;
+            trino_response = response.json().await?;
+
+            if let Some(error) = &trino_response.error {
+                return Err(OpenSkyError::Query(error.message.clone()));
+            }
+
+            if columns.is_none() {
+                columns = trino_response.columns;
+            }
+
+            if let Some(data) = trino_response.data {
+                all_rows.extend(data);
+            }
+
+            // Report progress
+            let status = QueryStatus {
+                query_id: query_id.clone(),
+                state: trino_response
+                    .stats
+                    .as_ref()
+                    .map(|s| s.state.clone())
+                    .unwrap_or_else(|| "RUNNING".to_string()),
+                progress: trino_response
+                    .stats
+                    .as_ref()
+                    .and_then(|s| s.progress_percentage)
+                    .unwrap_or(0.0),
+                row_count: all_rows.len(),
+            };
+            progress_callback(status);
+        }
+
+        let df = self.rows_to_dataframe(&columns.unwrap_or_default(), all_rows, default_columns)?;
+        Ok(FlightData::new(df))
+    }
+
     /// Execute query with progress callback.
     pub async fn history_with_progress<F>(
         &mut self,
@@ -351,7 +493,7 @@ impl Trino {
             .post(TRINO_URL)
             .header("Authorization", format!("Bearer {}", token))
             .header("X-Trino-User", username)
-            .header("X-Trino-Source", "opensky")
+            .header("X-Trino-Source", &self.source)
             .header("X-Trino-Catalog", "minio")
             .header("X-Trino-Schema", "osky")
             .body(sql.to_string())

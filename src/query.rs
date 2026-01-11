@@ -224,6 +224,8 @@ fn escape_sql(s: &str) -> String {
 /// This generates a SELECT statement against flights_data4.
 /// Behavior matches pyopensky: when departure_airport is set, filters by firstseen;
 /// otherwise filters by lastseen.
+///
+/// If only start time is provided (no stop), defaults to end of the same day (23:59:59).
 pub fn build_flightlist_query(params: &QueryParams) -> String {
     let columns = FLIGHTLIST_COLUMNS.join(", ");
 
@@ -232,11 +234,22 @@ pub fn build_flightlist_query(params: &QueryParams) -> String {
     );
 
     // Time and day bounds (required for partition pruning)
+    // If only start is provided, default stop to end of the same day
+    let (start_opt, stop_opt) = match (&params.start, &params.stop) {
+        (Some(start), Some(stop)) => (Some(start.clone()), Some(stop.clone())),
+        (Some(start), None) => {
+            // Default stop to end of start day (23:59:59)
+            let day = &start[..10]; // Extract YYYY-MM-DD
+            (Some(start.clone()), Some(format!("{} 23:59:59", day)))
+        }
+        _ => (None, None),
+    };
+
     // pyopensky behavior: filter on firstseen if departure_airport is set, else lastseen
-    if let (Some(start), Some(stop)) = (&params.start, &params.stop) {
-        let start_ts = datetime_to_unix(start);
-        let stop_ts = datetime_to_unix(stop);
-        let (start_day_ts, stop_day_ts) = compute_day_bounds_unix(start, stop);
+    if let (Some(start), Some(stop)) = (start_opt, stop_opt) {
+        let start_ts = datetime_to_unix(&start);
+        let stop_ts = datetime_to_unix(&stop);
+        let (start_day_ts, stop_day_ts) = compute_day_bounds_unix(&start, &stop);
 
         // Day partition filter
         sql.push_str(&format!("\n  AND day >= {start_day_ts}"));
@@ -619,5 +632,22 @@ mod tests {
         // rawdata JOIN is only on icao24, not callsign
         assert!(sql.contains("ON raw.icao24 = fl.icao24"));
         assert!(sql.contains("raw.mintime >= fl.firstseen"));
+    }
+
+    #[test]
+    fn test_flightlist_start_only_defaults_stop() {
+        // When only start is provided (no stop), should default stop to end of same day
+        let mut params = QueryParams::new();
+        params.start = Some("2025-01-15 10:00:00".to_string());
+        // Note: no stop time set
+
+        let sql = build_flightlist_query(&params);
+
+        // Should still have day partition filter
+        assert!(sql.contains("day >="));
+        assert!(sql.contains("day <"));
+        // Should have time filter (defaulting to 23:59:59)
+        assert!(sql.contains("lastseen >="));
+        assert!(sql.contains("lastseen <="));
     }
 }
